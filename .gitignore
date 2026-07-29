@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+# Preferências da interface: são de cada máquina, não do projeto.
+preferencias.json
+
+# Saves da bateria dos cartuchos e relatórios de diagnóstico.
+*.sav
+*.ram
+diagnostico*.txt
+
+# Cache de resultados das ROMs da Blargg (permite retomar a suíte).
+tests/.resultados.json
