@@ -73,6 +73,25 @@ TIPOS = {0x00: "ROM ONLY", 0x01: "MBC1", 0x02: "MBC1+RAM",
 # Quais tipos trazem pilha — e portanto guardam o save.
 COM_BATERIA = {0x03, 0x06, 0x09, 0x0F, 0x10, 0x13, 0x1B, 0x1E}
 
+# Os controladores que EXISTEM e que este emulador não implementa, com o que
+# cada um usa e onde aparece. Servem para o aviso ser útil em vez de genérico:
+# saber que o cartucho é um MBC7 e que ele precisa de acelerômetro explica de
+# imediato por que o jogo não vai se comportar.
+#
+# Todos são raros. Juntos, são algumas dezenas de cartuchos num catálogo de mais
+# de mil — mas incluem alguns nomes conhecidos.
+NAO_SUPORTADOS = {
+    0x0B: "MMM01 (multicart)",
+    0x0C: "MMM01+RAM (multicart)",
+    0x0D: "MMM01+RAM+BATTERY (multicart)",
+    0x20: "MBC6 (só o Net de Get japonês usa)",
+    0x22: "MBC7 (acelerômetro — Kirby Tilt 'n' Tumble, Command Master)",
+    0xFC: "Pocket Camera (a câmera do Game Boy)",
+    0xFD: "Bandai TAMA5 (Tamagotchi)",
+    0xFE: "HuC3 (relógio + infravermelho — Robopon, Pocket Family)",
+    0xFF: "HuC1 (infravermelho — Pokémon Card GB)",
+}
+
 
 # ======================================================================
 # Os controladores
@@ -562,6 +581,9 @@ class Cartridge:
         self.so_cgb = self.flag_cgb == 0xC0
         self.suporta_cgb = self.flag_cgb in (0x80, 0xC0)
 
+        # Preenchido por `_criar_mbc` quando o cartucho pede um controlador que
+        # este emulador não tem. Ver a explicação lá.
+        self.mbc_nao_suportado = None
         self.mbc = self._criar_mbc()
 
     def _ler_titulo(self):
@@ -599,8 +621,18 @@ class Cartridge:
             return MBC5(self)
         if t in (0x1C, 0x1D, 0x1E):
             return MBC5(self, com_rumble=True)
-        # Tipo desconhecido — ROMs caseiras às vezes deixam o byte errado.
-        # Tentar o MBC1 dá mais chance de funcionar do que recusar de saída.
+
+        # Chegou aqui: o cartucho pede um controlador que não temos.
+        #
+        # A escolha é cair no MBC1, que é o mais próximo dos que faltam no que
+        # importa (bancos de ROM e de RAM). Vários dos exóticos são o MBC1 com
+        # algo a mais colado — o HuC1, por exemplo, é essencialmente um MBC1 com
+        # infravermelho, e um jogo dele pode até funcionar sem o infravermelho.
+        #
+        # Mas isso é um chute, e chute silencioso é a pior espécie: o jogo
+        # rodaria com bancos errados, exibindo lixo, e ninguém saberia por quê.
+        # Por isso o palpite fica REGISTRADO, e o frontend avisa.
+        self.mbc_nao_suportado = NAO_SUPORTADOS.get(t, f"tipo 0x{t:02X}")
         return MBC1(self)
 
     # ------------------------------------------------------------------

@@ -61,6 +61,17 @@ from .apu import APU
 from .serial import Serial
 from .joypad import Joypad
 
+# O valor do contador interno do timer no instante em que a ROM de boot entrega
+# o controle ao jogo. O byte alto é o que o jogo lê em FF04, e vale 0xAB num
+# DMG — a Pan Docs documenta esse número, medido em hardware.
+#
+# Os 8 bits de BAIXO não estão documentados em lugar nenhum, porque nenhum
+# programa consegue lê-los. Mas eles importam: o teste `boot_div` da Mooneye lê
+# o DIV algumas instruções depois de 0x0100, e nesse intervalo o contador andou
+# o suficiente para o byte baixo decidir se o alto virou. O valor abaixo foi
+# encontrado varrendo os 256 possíveis contra esse teste.
+DIV_POS_BOOT = 0xABCC
+
 
 class Machine:
     def __init__(self, cart):
@@ -399,30 +410,52 @@ class Machine:
         Os valores abaixo foram medidos num DMG real e são o que a ROM de boot
         deixa para trás.
         """
-        self.cpu.reset_pos_boot()
+        self.cpu.reset_pos_boot(self.cart)
         self.if_ = 0xE1
         self.ie = 0x00
 
-        # O contador do timer não começa em zero: a ROM de boot leva um tempo
-        # para rodar, e o contador andou junto. O valor exato importa para jogos
-        # que usam o DIV como fonte de números aleatórios.
-        self.timer.contador = 0xABCC
+        # --- Timer ---
+        # O contador não começa em zero: a ROM de boot leva um tempo para rodar,
+        # e o contador andou junto. O byte alto vira o DIV, que vale 0xAB neste
+        # ponto — e é por isso que o DIV serve de fonte de aleatoriedade para os
+        # jogos: ele carrega quanto tempo o boot demorou.
+        self.timer.contador = DIV_POS_BOOT
         self.timer.escrever_tac(0xF8)
         self.timer.tima = 0
         self.timer.tma = 0
 
+        # --- Vídeo ---
         self.ppu.lcdc = 0x91        # vídeo ligado, fundo ligado, sprites ligados
         self.ppu.ligado = True
         self.ppu.stat = 0x85
         self.ppu.bgp = 0xFC         # paleta de fundo
+        # As paletas de sprite NÃO são inicializadas pela ROM de boot: elas ficam
+        # com o que estava na memória. Todo jogo as configura antes de mostrar
+        # sprites, e 0xFF é o valor mais comum no hardware.
         self.ppu.obp0 = 0xFF
         self.ppu.obp1 = 0xFF
 
-        # O som também sai ligado, com o volume alto e todos os canais
-        # liberados: o jingle de abertura acabou de tocar.
-        self.apu.escrever(0xFF26, 0xF1)
-        self.apu.escrever(0xFF24, 0x77)
-        self.apu.escrever(0xFF25, 0xF3)
+        # --- Joypad ---
+        # O P1 sai com as duas linhas SELECIONADAS (bits 4 e 5 em zero), o que
+        # faz o registrador ler 0xCF. A ROM de boot deixa assim ao ler os botões.
+        self.joypad.selecao = 0x00
+
+        # --- Cópia de sprites ---
+        # O registrador de origem do DMA não é inicializado e lê 0xFF.
+        self.dma.origem = 0xFF
+
+        # --- Som ---
+        # A ROM de boot toca o "ba-ding" da abertura, e o canal 1 chega ao jogo
+        # ainda ligado. Reproduzir isso exige mais do que soltar valores nos
+        # registradores: o canal precisa ser realmente disparado, senão o bit 0
+        # do NR52 lê zero e um jogo que consulte o estado do som vê a coisa
+        # errada.
+        self.apu.escrever(0xFF26, 0xF1)   # liga o som
+        self.apu.escrever(0xFF11, 0x80)   # duty 2, o do jingle
+        self.apu.escrever(0xFF12, 0xF3)   # envelope: volume 15 descendo
+        self.apu.escrever(0xFF14, 0x80)   # dispara o canal 1
+        self.apu.escrever(0xFF24, 0x77)   # volume geral no máximo
+        self.apu.escrever(0xFF25, 0xF3)   # roteamento dos canais
 
     # Um quadro inteiro: 154 linhas de 456 dots cada.
     #

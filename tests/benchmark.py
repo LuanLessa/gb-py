@@ -71,6 +71,31 @@ def rom_sintetica():
 ORCAMENTO_MS = 1000.0 / 59.7      # tempo disponível por quadro a 60 Hz
 
 
+def _aquecer(m, teto, janela=0.25, tolerancia=0.03):
+    """
+    Roda até a velocidade parar de mudar, e devolve quantos segundos levou.
+
+    Mede a velocidade em janelas de `janela` segundos e para quando duas
+    seguidas concordam dentro de `tolerancia`. O `teto` é o limite de paciência:
+    se não estabilizar, desiste e deixa a medição seguir.
+
+    O resultado é descartado — o que interessa é o efeito colateral de deixar o
+    compilador em tempo de execução com tudo já traduzido.
+    """
+    t0 = time.perf_counter()
+    anterior = None
+    while time.perf_counter() - t0 < teto:
+        inicio = time.perf_counter()
+        c0 = m.cycles
+        while time.perf_counter() - inicio < janela:
+            m.rodar_frame()
+        atual = (m.cycles - c0) / (time.perf_counter() - inicio)
+        if anterior and abs(atual - anterior) <= tolerancia * max(atual, anterior):
+            break
+        anterior = atual
+    return time.perf_counter() - t0
+
+
 def medir(m, segundos, rotulo, detalhar=False):
     """
     Mede velocidade e, opcionalmente, a DISTRIBUIÇÃO do tempo por quadro.
@@ -79,7 +104,30 @@ def medir(m, segundos, rotulo, detalhar=False):
     alternando entre 90 e 40 e parecer horrível. O que decide se a imagem sai
     lisa é o pior caso — se o quadro no percentil 99 cabe no orçamento de
     16,7 ms, não há drop visível.
+
+    A RODADA DE DESCARTE, logo abaixo, existe por causa de uma medição que
+    saiu errada e quase levou a uma conclusão errada.
+
+    Sob PyPy, o `--regs` mediu 1297 fps para a implementação `pares` enquanto o
+    modo padrão media 922 — 40% de diferença medindo exatamente a mesma coisa. A
+    causa: no `--regs` a variante `pares` roda DEPOIS de a `memoryview` ter
+    passado três segundos compilando os traces do JIT, e herda esse trabalho
+    pronto. No modo padrão, o aquecimento saía mais curto.
+
+    Num interpretador com compilação em tempo de execução, "aquecer" não é
+    superstição: as primeiras milhares de iterações rodam interpretadas enquanto
+    o compilador observa, e só depois viram código de máquina. Medir antes disso
+    mede o compilador trabalhando, não o programa.
+
+    O aquecimento não usa tempo fixo: ele mede em janelas curtas e para quando
+    duas janelas seguidas concordam dentro de 3%. Um tempo fixo teria de ser
+    escolhido para o pior caso — e no PyPy o tempo até estabilizar depende da
+    máquina, do jogo e da versão do compilador. Esperar até a medição parar de
+    mudar funciona em qualquer combinação, e não desperdiça tempo onde não
+    precisa (no CPython, a primeira janela já serve).
     """
+    _aquecer(m, teto=segundos)
+
     tempos = []
     t0 = time.perf_counter()
     c0 = m.cycles
@@ -145,6 +193,24 @@ def main():
         m.rodar_frame()
 
     if "--perfil" in opts:
+        # AVISO IMPORTANTE, sobretudo sob PyPy.
+        #
+        # O profiler cobra por CHAMADA de função — medimos 241 ns cada, e 53%
+        # de acréscimo ao tempo total. Isso não distribui o erro por igual: uma
+        # função chamada um milhão de vezes que faz pouquíssimo trabalho aparece
+        # inflada, porque o custo do profiler supera o dela.
+        #
+        # Sob PyPy o efeito é pior, e a documentação oficial avisa que o
+        # cProfile "pode distorcer o resultado, às vezes massivamente" — o
+        # profiler impede o JIT de embutir as funções pequenas, que é exatamente
+        # o que ele faria em execução normal.
+        #
+        # Como ler o perfil, então: confie nas CONTAGENS de chamada, que são
+        # exatas, e desconfie dos tempos das funções curtas. Para decidir se uma
+        # otimização valeu, meça o tempo TOTAL sem profiler — é o que o modo
+        # padrão deste script faz.
+        print("  nota: o profiler infla funções pequenas e muito chamadas.")
+        print("        confie nas contagens; confirme os tempos sem ele.\n")
         import cProfile
         import pstats
         pr = cProfile.Profile()

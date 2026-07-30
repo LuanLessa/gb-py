@@ -131,7 +131,7 @@ class CPU:
     # ------------------------------------------------------------------
     # Estado inicial
     # ------------------------------------------------------------------
-    def reset_pos_boot(self):
+    def reset_pos_boot(self, cart=None):
         """
         Coloca os registradores como estariam logo após a ROM de boot terminar.
 
@@ -141,14 +141,36 @@ class CPU:
         os registradores em valores conhecidos.
 
         Este emulador pula a animação e começa direto do resultado. Os valores
-        abaixo são os que a ROM de boot de um DMG deixa; jogos os assumem, e
-        alguns até dependem disso — dá para descobrir em qual modelo de console
-        se está rodando examinando o que veio em A.
+        abaixo são os medidos num DMG real; jogos os assumem, e alguns até
+        dependem disso — dá para descobrir em qual modelo de console se está
+        rodando examinando o que veio em A.
+
+        O REGISTRADOR F É O CASO INTERESSANTE
+
+        Ele não tem valor fixo, e o motivo é bonito: a última coisa que a ROM de
+        boot faz antes de entregar o controle é conferir o checksum do cabeçalho
+        do cartucho. Essa comparação deixa rastro nas flags, e o rastro chega até
+        o jogo.
+
+        Se o checksum guardado em 0x14D for zero, a comparação não gera "vai um"
+        nem meio-carry, e as duas flags saem limpas. Qualquer outro valor liga as
+        duas. Ou seja: um byte do cartucho decide o estado de dois bits do
+        processador, e isso é observável.
+
+        Nenhum jogo comercial depende disso. A ROM `boot_regs-dmgABC` da Mooneye
+        depende, e é justo aí que a diferença entre "aproximado" e "correto"
+        aparece.
         """
-        self.reg8[A] = 0x01; self.reg8[F] = 0xB0
+        self.reg8[A] = 0x01
         self.reg8[B] = 0x00; self.reg8[C] = 0x13
         self.reg8[D] = 0x00; self.reg8[E] = 0xD8
         self.reg8[H] = 0x01; self.reg8[L] = 0x4D
+
+        # Z sempre ligado; N sempre desligado. H e C dependem do cartucho.
+        checksum_zerado = cart is not None and len(cart.rom) > 0x14D \
+            and cart.rom[0x14D] == 0x00
+        self.reg8[F] = 0x80 if checksum_zerado else 0xB0
+
         self.reg16[SP] = 0xFFFE       # a pilha começa no topo da memória
         self.reg16[PC] = 0x0100       # e o jogo sempre começa em 0x0100
         self.ime = False

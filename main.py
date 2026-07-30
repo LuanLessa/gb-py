@@ -60,6 +60,7 @@ virtual, e já pegou dois defeitos que nenhuma outra parte da suíte pegaria.
 
 import argparse
 import os
+import platform
 import sys
 import time
 
@@ -162,10 +163,55 @@ def info_do_cartucho(cart):
     print(f"Bateria:    {'sim' if cart.tem_bateria else 'não'}")
     print(f"Checksum:   {'OK' if cart.header_checksum_ok() else 'FALHOU'}")
 
+    # Avisar é melhor do que rodar errado em silêncio. Um cartucho com
+    # controlador não suportado vai exibir lixo em algum momento, e sem este
+    # aviso pareceria bug do emulador em vez de limitação conhecida.
+    if cart.mbc_nao_suportado:
+        print()
+        print(f"AVISO: este cartucho usa {cart.mbc_nao_suportado},")
+        print("       que este emulador não implementa. Ele vai rodar com um")
+        print("       MBC1 no lugar, o que pode funcionar em parte ou nada.")
+
 
 def caminho_do_save(rom):
     """O arquivo `.sav` que corresponde a uma ROM: o mesmo nome, outra extensão."""
     return os.path.splitext(rom)[0] + ".sav"
+
+
+# Abaixo desta fração da velocidade real, o jogo já está visivelmente em câmera
+# lenta ou pulando quadros. 0,90x corresponde a 54 dos 59,7 quadros do console.
+LIMITE_PARA_SUGERIR_PYPY = 0.90
+
+
+def sugerir_pypy_se_estiver_lento(velocidade_media):
+    """
+    Sugere o PyPy — mas só se a máquina de quem está rodando precisar.
+
+    A primeira versão disto afirmava "o PyPy é 30x mais rápido", com base numa
+    medição minha. Estava errado como conselho: aquele número saiu de uma
+    máquina lenta, e num computador atual o CPython pode muito bem dar os 60
+    quadros por segundo sem ajuda nenhuma. Avisar todo mundo teria mandado gente
+    instalar outro interpretador para resolver um problema que ela não tem.
+
+    O jeito honesto é não afirmar nada e medir. O frontend já sabe a velocidade
+    real que está entregando; se ela estiver boa, o aviso não aparece. Se
+    estiver ruim, aparece uma vez, com o número medido AQUI dentro.
+
+    Vale a diferença entre os dois interpretadores continuar registrada: um
+    emulador é um laço apertado interpretando outro laço apertado, e é o caso em
+    que a compilação em tempo de execução do PyPy rende mais. Só o quanto ela
+    rende depende da máquina.
+    """
+    if platform.python_implementation() == "PyPy":
+        return
+    if velocidade_media >= LIMITE_PARA_SUGERIR_PYPY:
+        return
+    print()
+    print(f"Este computador está entregando {velocidade_media:.0%} da velocidade"
+          f" do console.")
+    print("Sob PyPy o mesmo código costuma correr várias vezes mais rápido, o")
+    print("que resolveria a câmera lenta: https://pypy.org")
+    print("Depois de instalar, rode `pypy main.py` em vez de `python main.py`.")
 
 
 class Sessao:
@@ -480,6 +526,11 @@ def rodar_com_janela(sessao, prefs, pasta_de_roms=PASTA_DE_ROMS,
 
         sessao = nova
         prefs["ultima_rom"] = os.path.abspath(caminho)
+        # Só agora dá para saber se esta máquina precisava do conselho.
+        if tempo_medido > 2.0:
+            sugerir_pypy_se_estiver_lento(
+                quadros_medidos / tempo_medido / 59.7275)
+
         prefs["ultima_pasta"] = os.path.abspath(livraria.pasta)
         prefs.salvar()
 
@@ -499,6 +550,10 @@ def rodar_com_janela(sessao, prefs, pasta_de_roms=PASTA_DE_ROMS,
 
     rodando = True
     turbo = False
+    # Para a sugestão de PyPy: quantos quadros foram emulados e em quanto tempo,
+    # ignorando o turbo (que roda de propósito acima da velocidade real).
+    quadros_medidos = 0
+    tempo_medido = 0.0
     contador_turbo = 0
     margem = MARGEM_MINIMA
     quadros = 0
@@ -672,6 +727,9 @@ def rodar_com_janela(sessao, prefs, pasta_de_roms=PASTA_DE_ROMS,
                   f"   {emulados:.0f} fps "
                   f"({emulados / 59.7:.0%} da velocidade real{extra})"
                   + ("   [TURBO]" if turbo else ""))
+              if not turbo:
+                  quadros_medidos += quadros
+                  tempo_medido += agora - t_placar
               quadros = mostrados = 0
               t_placar = agora
 
@@ -724,6 +782,11 @@ def rodar_com_janela(sessao, prefs, pasta_de_roms=PASTA_DE_ROMS,
             som.encerrar()
         pygame.quit()
         soltar_relogio()
+
+        # Só agora dá para saber se esta máquina precisava do conselho.
+        if tempo_medido > 2.0:
+            sugerir_pypy_se_estiver_lento(
+                quadros_medidos / tempo_medido / 59.7275)
 
         prefs["ultima_pasta"] = os.path.abspath(livraria.pasta)
         if sessao:

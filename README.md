@@ -237,6 +237,22 @@ jeito, com os dois concordando sobre a coisa errada. As ROMs da Blargg foram
 escritas por terceiros e calibradas contra o hardware real. Elas não sabem nada
 sobre este projeto.
 
+**Mooneye Test Suite: 68 de 89 aplicáveis.** Outra suíte de terceiros, mais dura
+que a da Blargg em temporização. Passam inteiros os grupos de MBC2, MBC5, bits
+inexistentes, DAA, interrupções e cópia de sprites; MBC1 e temporizador falham em
+um caso cada. As 21 falhas restantes se concentram em dois lugares: a
+temporização exata dos acessos de instruções de salto (diagnóstico feito, causa
+isolada) e o instante da interrupção de vídeo.
+
+**dmg-acid2: passa.** O teste de renderização — uma carinha que só sai certa se
+prioridade de sprites, janela, espelhamento e paletas estiverem todos corretos.
+
+**Mealybug Tearoom: 0 de 24.** Estas comparam a tela pixel a pixel com uma
+captura de hardware real, e mudam registradores de vídeo *no meio* de uma linha.
+Nossa PPU desenha a linha inteira de uma vez, então uma escrita no meio dela não
+tem onde aparecer. Passar aqui exige uma PPU pixel a pixel — reescrita do módulo
+de vídeo, não ajuste. O detalhe está em `levantamento-suites.md`.
+
 ### Rodando os testes
 
 ```
@@ -244,6 +260,8 @@ python tests/executar_todos.py            tudo
 python tests/executar_todos.py --rapido   só os unitários, em segundos
 python tests/test_blargg.py               só as ROMs, distribuídas entre núcleos
 python tests/test_blargg.py cpu           só um grupo
+python tests/test_mooneye.py              a suíte da Mooneye
+python tests/test_mealybug.py             comparação de imagem com hardware real
 python tests/test_timer.py                um arquivo isolado
 ```
 
@@ -291,6 +309,28 @@ python tests/benchmark.py jogo.gb --regs     compara as duas visões de registra
 O número que importa é o **"x tempo real"**. Olhar os quadros por segundo na
 barra de título não mede o emulador: mede o limitador, que segura tudo em 59,7
 de propósito.
+
+### Vai rodar liso na sua máquina?
+
+O requisito é objetivo: **4,19 MHz efetivos**, que é o relógio de um Game Boy.
+O benchmark mostra quantos a sua máquina entrega.
+
+    python tests/benchmark.py jogo.gb
+      sem áudio        57.2 fps   0.95x tempo real   4.00 MHz
+
+Acima de 4,19 MHz o jogo roda na velocidade certa com todos os quadros
+desenhados; abaixo, o emulador começa a pular desenhos para manter o ritmo. O
+desenho em si não pesa — a conversão de uma tela leva 58 µs, ou 0,3% do
+orçamento de um quadro. O gargalo é sempre a emulação.
+
+Dá para conferir sem benchmark, jogando: a barra de título mostra
+`60 fps (100% da velocidade real)` quando está tudo desenhado, e acrescenta
+`, N na tela` quando começa a pular. A segunda forma significa que a máquina
+está no limite.
+
+Medições nossas, para calibrar a expectativa: um computador atual roda Zelda a
+100% sob CPython, com todos os quadros. Uma máquina modesta pode precisar do
+PyPy — e o emulador avisa sozinho quando for o caso, com o número medido ali.
 
 Rodar sob **PyPy** em vez do Python comum faz a maior diferença isolada — o
 emulador passa de arrastado para folgado.
